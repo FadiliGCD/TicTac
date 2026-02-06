@@ -32,7 +32,7 @@ export default function TabsLayout() {
           title: "Dashboard",
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
-              name={focused ? "grid" : "grid-outline"}
+              name={focused ? "pie-chart" : "pie-chart-outline"}
               size={size}
               color={color}
             />
@@ -60,7 +60,7 @@ export default function TabsLayout() {
           title: "Income",
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
-              name={focused ? "cash" : "cash-outline"}
+              name={focused ? "wallet" : "wallet-outline"}
               size={size}
               color={color}
             />
@@ -74,7 +74,7 @@ export default function TabsLayout() {
           title: "Expenses",
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
-              name={focused ? "card" : "card-outline"}
+              name={focused ? "receipt" : "receipt-outline"}
               size={size}
               color={color}
             />
@@ -88,7 +88,7 @@ export default function TabsLayout() {
           title: "Flows",
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
-              name={focused ? "swap-vertical" : "swap-vertical-outline"}
+              name={focused ? "trending-up" : "trending-up-outline"}
               size={size}
               color={color}
             />
@@ -102,7 +102,7 @@ export default function TabsLayout() {
           title: "Settings",
           tabBarIcon: ({ color, size, focused }) => (
             <Ionicons
-              name={focused ? "settings" : "settings-outline"}
+              name={focused ? "options" : "options-outline"}
               size={size}
               color={color}
             />

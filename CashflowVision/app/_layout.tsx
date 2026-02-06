@@ -23,8 +23,9 @@ export default function RootLayout() {
           headerTintColor: theme.tint,
         }}
       >
-        {/* Welcome */}
+        {/* Onboarding */}
         <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen name="onboarding/details" options={{ headerShown: false }} />
 
         {/* Tabs */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
