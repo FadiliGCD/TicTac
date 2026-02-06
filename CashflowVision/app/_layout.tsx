@@ -23,8 +23,13 @@ export default function RootLayout() {
           headerTintColor: theme.tint,
         }}
       >
+        {/* Welcome */}
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+
+        {/* Tabs */}
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
 
+        {/* Edit screens */}
         <Stack.Screen name="income/edit" options={{ headerShown: true }} />
         <Stack.Screen name="expenses/edit" options={{ headerShown: true }} />
         <Stack.Screen name="flows/edit" options={{ headerShown: true }} />

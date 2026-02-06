@@ -55,7 +55,7 @@ export default function Dashboard() {
     return { income, expense, flow, net };
   }, [settings, incomes, expenses, flows, base]);
 
-  // Keep only end balance projection
+  // Projection end balance only
   const projectionEndBalance = useMemo(() => {
     if (!settings) return null;
     const from = new Date();
@@ -86,7 +86,6 @@ export default function Dashboard() {
     ].filter((x) => x.value > 0.00001);
   }, [perBaseTotals]);
 
-  // Build donut paths + label positions
   const donut = useMemo(() => {
     const size = 220;
     const rOuter = 90;
@@ -101,8 +100,6 @@ export default function Dashboard() {
     const arcs = pieGen(pieSlices);
 
     const arcPath = d3.arc<d3.PieArcDatum<Slice>>().innerRadius(rInner).outerRadius(rOuter);
-
-    // Put labels roughly in the middle of the ring
     const arcLabel = d3
       .arc<d3.PieArcDatum<Slice>>()
       .innerRadius((rInner + rOuter) / 2)
@@ -111,9 +108,7 @@ export default function Dashboard() {
     const paths = arcs.map((a) => {
       const [lx, ly] = arcLabel.centroid(a);
       const pct = (a.data.value / total) * 100;
-
-      // Hide label for tiny slices (looks messy)
-      const showLabel = pct >= 6; // tweak threshold if you want
+      const showLabel = pct >= 6;
 
       return {
         key: a.data.key,
@@ -128,7 +123,7 @@ export default function Dashboard() {
       };
     });
 
-    return { size, total, paths };
+    return { size, paths };
   }, [pieSlices]);
 
   if (!settings || !perBaseTotals || projectionEndBalance == null) {
@@ -144,22 +139,7 @@ export default function Dashboard() {
     <Screen>
       <Title>Dashboard</Title>
 
-      <Card>
-        <Label>Projection (next 90 days)</Label>
-        <Row
-          left={<Sub>End balance</Sub>}
-          right={<Sub>{currency} {projectionEndBalance.toFixed(2)}</Sub>}
-        />
-      </Card>
-
-      <Card>
-        <Label>Per {base}</Label>
-        <Row left={<Sub>Income</Sub>} right={<Sub>{currency} {perBaseTotals.income.toFixed(2)}</Sub>} />
-        <Row left={<Sub>Fixed expenses</Sub>} right={<Sub>{currency} {perBaseTotals.expense.toFixed(2)}</Sub>} />
-        <Row left={<Sub>Savings / Investments / Flows</Sub>} right={<Sub>{currency} {perBaseTotals.flow.toFixed(2)}</Sub>} />
-        <Row left={<Sub>Net remaining</Sub>} right={<Sub>{currency} {perBaseTotals.net.toFixed(2)}</Sub>} />
-      </Card>
-
+      {/* 1) PIE FIRST */}
       <Card>
         <Label>Where your money goes</Label>
 
@@ -174,7 +154,6 @@ export default function Dashboard() {
                     <Path key={p.key} d={p.d} fill={p.color} />
                   ))}
 
-                  {/* Percent labels */}
                   {donut.paths.map((p) =>
                     p.showLabel ? (
                       <SvgText
@@ -182,7 +161,7 @@ export default function Dashboard() {
                         x={p.lx}
                         y={p.ly}
                         fontSize={12}
-                        fontWeight="700"
+                        fontWeight="800"
                         fill="#FFFFFF"
                         textAnchor="middle"
                         alignmentBaseline="middle"
@@ -212,12 +191,26 @@ export default function Dashboard() {
                 You’re over-allocated by {currency} {Math.abs(perBaseTotals.net).toFixed(2)} per {base}.
               </Sub>
             ) : null}
-
-            <Sub style={{ marginTop: 8 }}>
-              Percent labels hide automatically for very small slices.
-            </Sub>
           </>
         )}
+      </Card>
+
+      {/* 2) PER MONTHLY (BASE) SECOND */}
+      <Card>
+        <Label>Per {base}</Label>
+        <Row left={<Sub>Income</Sub>} right={<Sub>{currency} {perBaseTotals.income.toFixed(2)}</Sub>} />
+        <Row left={<Sub>Fixed expenses</Sub>} right={<Sub>{currency} {perBaseTotals.expense.toFixed(2)}</Sub>} />
+        <Row left={<Sub>Savings / Investments / Flows</Sub>} right={<Sub>{currency} {perBaseTotals.flow.toFixed(2)}</Sub>} />
+        <Row left={<Sub>Net remaining</Sub>} right={<Sub>{currency} {perBaseTotals.net.toFixed(2)}</Sub>} />
+      </Card>
+
+      {/* 3) PROJECTION LAST */}
+      <Card>
+        <Label>Projection (next 90 days)</Label>
+        <Row
+          left={<Sub>End balance</Sub>}
+          right={<Sub>{currency} {projectionEndBalance.toFixed(2)}</Sub>}
+        />
       </Card>
     </Screen>
   );
