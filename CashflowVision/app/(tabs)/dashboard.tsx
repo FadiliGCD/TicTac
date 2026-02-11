@@ -7,9 +7,14 @@ import { Screen, Card, Title, Label, Row, Sub } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
 import { useRepo } from "../../src/db/repo";
 import { buildCashflow } from "../../src/domain/cashflowBuilder";
-import { fromYearly, toYearly, round2 } from "../../src/domain/money";
+import { addDays, startOfMonth } from "../../src/domain/schedule";
+import { round2 } from "../../src/domain/money";
 
 type Slice = { key: string; value: number; color: string };
+
+function endOfMonth(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0);
+}
 
 export default function Dashboard() {
   const repo = useRepo();
@@ -29,63 +34,114 @@ export default function Dashboard() {
     load();
   }, []);
 
-  const base = settings?.base_frequency ?? "monthly";
   const currency = settings?.currency ?? "EUR";
+  const today = useMemo(() => new Date(), []);
 
-  const perBaseTotals = useMemo(() => {
+  /**
+   * Monthly window logic:
+   * - Carryover = balance at end of previous day (before month starts)
+   * - Available = carryover + income within month
+   * - Allocations = expenses + flows within month (includes one-time items)
+   * - Remaining/Deficit computed from available vs allocations
+   */
+  const monthModel = useMemo(() => {
     if (!settings) return null;
 
-    const incomeYearly = incomes
-      .filter((x) => x.enabled === 1)
-      .reduce((s, x) => s + toYearly(x.amount, x.frequency), 0);
+    const monthFrom = startOfMonth(today);
+    const monthTo = endOfMonth(today);
 
-    const expenseYearly = expenses
-      .filter((x) => x.enabled === 1)
-      .reduce((s, x) => s + toYearly(x.amount, x.frequency), 0);
+    // Look back 1 year to approximate carryover accurately (recurring patterns + one-time history).
+    const lookbackFrom = new Date(monthFrom);
+    lookbackFrom.setFullYear(lookbackFrom.getFullYear() - 1);
 
-    const flowYearly = flows
-      .filter((x) => x.enabled === 1)
-      .reduce((s, x) => s + toYearly(x.amount, x.frequency), 0);
+    const prevTo = addDays(monthFrom, -1);
 
-    const income = round2(fromYearly(incomeYearly, base));
-    const expense = round2(fromYearly(expenseYearly, base));
-    const flow = round2(fromYearly(flowYearly, base));
-    const net = round2(income - expense - flow);
+    // 1) Build up to the day before month starts to get carryover
+    const prevBuilt = buildCashflow({
+      settings,
+      incomes,
+      expenses,
+      flows,
+      from: lookbackFrom,
+      to: prevTo,
+    });
 
-    return { income, expense, flow, net };
-  }, [settings, incomes, expenses, flows, base]);
+    const carryover =
+      prevBuilt.withBalance.length > 0
+        ? prevBuilt.withBalance[prevBuilt.withBalance.length - 1].balanceAfter
+        : settings.starting_balance;
 
-  // Projection end balance only
-  const projectionEndBalance = useMemo(() => {
-    if (!settings) return null;
-    const from = new Date();
-    const to = new Date();
-    to.setDate(to.getDate() + 90);
+    // 2) Build this month using carryover as the starting balance
+    const monthSettings = { ...settings, starting_balance: carryover };
 
-    const built = buildCashflow({ settings, incomes, expenses, flows, from, to });
-    const endBalance = built.withBalance.length
-      ? built.withBalance[built.withBalance.length - 1].balanceAfter
-      : settings.starting_balance;
+    const monthBuilt = buildCashflow({
+      settings: monthSettings,
+      incomes,
+      expenses,
+      flows,
+      from: monthFrom,
+      to: monthTo,
+    });
 
-    return endBalance;
-  }, [settings, incomes, expenses, flows]);
+    // Sum by type inside the month (one-time included automatically if it falls in the window)
+    let incomeTotal = 0;
+    let expenseTotal = 0;
+    let flowTotal = 0;
 
+    for (const e of monthBuilt.events) {
+      if (e.type === "income") incomeTotal += e.amount;
+      else if (e.type === "expense") expenseTotal += e.amount;
+      else flowTotal += e.amount;
+    }
+
+    incomeTotal = round2(incomeTotal);
+    expenseTotal = round2(expenseTotal);
+    flowTotal = round2(flowTotal);
+
+    const available = round2(carryover + incomeTotal);
+    const allocated = round2(expenseTotal + flowTotal);
+
+    const remaining = round2(Math.max(0, available - allocated));
+    const deficit = round2(Math.max(0, allocated - available));
+
+    // End-of-month balance = carryover + income - expense - flow
+    const endBalance = round2(carryover + incomeTotal - expenseTotal - flowTotal);
+
+    return {
+      monthFrom,
+      monthTo,
+      carryover: round2(carryover),
+      incomeTotal,
+      expenseTotal,
+      flowTotal,
+      available,
+      allocated,
+      remaining,
+      deficit,
+      endBalance,
+    };
+  }, [settings, incomes, expenses, flows, today]);
+
+  // Build pie slices from monthly window:
+  // total available = carryover + income
+  // slices: expenses, flows, remaining or deficit
   const pieSlices: Slice[] = useMemo(() => {
-    if (!perBaseTotals) return [];
+    if (!monthModel) return [];
 
-    const expense = Math.max(0, perBaseTotals.expense);
-    const flow = Math.max(0, perBaseTotals.flow);
-    const remaining = perBaseTotals.net >= 0 ? perBaseTotals.net : 0;
-    const deficit = perBaseTotals.net < 0 ? Math.abs(perBaseTotals.net) : 0;
+    const expense = Math.max(0, monthModel.expenseTotal);
+    const flow = Math.max(0, monthModel.flowTotal);
+    const remaining = Math.max(0, monthModel.remaining);
+    const deficit = Math.max(0, monthModel.deficit);
 
     return [
-      { key: "Fixed Expenses", value: expense, color: "#FF3B30" },
+      { key: "Expenses", value: expense, color: "#FF3B30" },
       { key: "Savings/Investments", value: flow, color: "#AF52DE" },
       { key: "Remaining", value: remaining, color: "#34C759" },
       { key: "Deficit", value: deficit, color: "#FF9500" },
     ].filter((x) => x.value > 0.00001);
-  }, [perBaseTotals]);
+  }, [monthModel]);
 
+  // Donut paths + % labels
   const donut = useMemo(() => {
     const size = 220;
     const rOuter = 90;
@@ -108,7 +164,7 @@ export default function Dashboard() {
     const paths = arcs.map((a) => {
       const [lx, ly] = arcLabel.centroid(a);
       const pct = (a.data.value / total) * 100;
-      const showLabel = pct >= 6;
+      const showLabel = pct >= 6; // hide tiny slices to keep it clean
 
       return {
         key: a.data.key,
@@ -126,7 +182,23 @@ export default function Dashboard() {
     return { size, paths };
   }, [pieSlices]);
 
-  if (!settings || !perBaseTotals || projectionEndBalance == null) {
+  // 90-day projection (kept, but shown last)
+  const projectionEndBalance = useMemo(() => {
+    if (!settings) return null;
+
+    const from = new Date();
+    const to = new Date();
+    to.setDate(to.getDate() + 90);
+
+    const built = buildCashflow({ settings, incomes, expenses, flows, from, to });
+    const endBal = built.withBalance.length
+      ? built.withBalance[built.withBalance.length - 1].balanceAfter
+      : settings.starting_balance;
+
+    return endBal;
+  }, [settings, incomes, expenses, flows]);
+
+  if (!settings || !monthModel || projectionEndBalance == null) {
     return (
       <Screen>
         <Title>Dashboard</Title>
@@ -135,16 +207,24 @@ export default function Dashboard() {
     );
   }
 
+  const monthName = monthModel.monthFrom.toLocaleString(undefined, { month: "long", year: "numeric" });
+
   return (
     <Screen>
       <Title>Dashboard</Title>
 
-      {/* 1) PIE FIRST */}
+      {/* 1) PIE FIRST (MONTH WINDOW, INCLUDES ONE-TIME) */}
       <Card>
-        <Label>Where your money goes</Label>
+        <Label>{monthName} — Monthly window</Label>
+
+        <Sub style={{ marginTop: 2 }}>
+          Available = Carryover + Income (one-time included).
+        </Sub>
 
         {!donut ? (
-          <Sub>No data yet. Add income/expenses/flows to see the chart.</Sub>
+          <Sub style={{ marginTop: 10 }}>
+            No data yet. Add income/expenses/flows to see the chart.
+          </Sub>
         ) : (
           <>
             <View style={styles.chartWrap}>
@@ -153,7 +233,6 @@ export default function Dashboard() {
                   {donut.paths.map((p) => (
                     <Path key={p.key} d={p.d} fill={p.color} />
                   ))}
-
                   {donut.paths.map((p) =>
                     p.showLabel ? (
                       <SvgText
@@ -186,22 +265,37 @@ export default function Dashboard() {
               ))}
             </View>
 
-            {perBaseTotals.net < 0 ? (
+            {monthModel.deficit > 0 ? (
               <Sub style={{ marginTop: 10, color: "#FF9500" }}>
-                You’re over-allocated by {currency} {Math.abs(perBaseTotals.net).toFixed(2)} per {base}.
+                You’re over-allocated by {currency} {monthModel.deficit.toFixed(2)} this month.
               </Sub>
             ) : null}
           </>
         )}
       </Card>
 
-      {/* 2) PER MONTHLY (BASE) SECOND */}
+      {/* 2) PER MONTH (MONTH WINDOW DETAILS) */}
       <Card>
-        <Label>Per {base}</Label>
-        <Row left={<Sub>Income</Sub>} right={<Sub>{currency} {perBaseTotals.income.toFixed(2)}</Sub>} />
-        <Row left={<Sub>Fixed expenses</Sub>} right={<Sub>{currency} {perBaseTotals.expense.toFixed(2)}</Sub>} />
-        <Row left={<Sub>Savings / Investments / Flows</Sub>} right={<Sub>{currency} {perBaseTotals.flow.toFixed(2)}</Sub>} />
-        <Row left={<Sub>Net remaining</Sub>} right={<Sub>{currency} {perBaseTotals.net.toFixed(2)}</Sub>} />
+        <Label>This month breakdown</Label>
+
+        <Row
+          left={<Sub>Carryover (from last month)</Sub>}
+          right={<Sub>{currency} {monthModel.carryover.toFixed(2)}</Sub>}
+        />
+        <Row left={<Sub>Income (incl. one-time)</Sub>} right={<Sub>{currency} {monthModel.incomeTotal.toFixed(2)}</Sub>} />
+        <Row left={<Sub>Available</Sub>} right={<Sub>{currency} {monthModel.available.toFixed(2)}</Sub>} />
+
+        <View style={{ height: 10 }} />
+
+        <Row left={<Sub>Expenses (incl. one-time)</Sub>} right={<Sub>{currency} {monthModel.expenseTotal.toFixed(2)}</Sub>} />
+        <Row left={<Sub>Flows (incl. one-time)</Sub>} right={<Sub>{currency} {monthModel.flowTotal.toFixed(2)}</Sub>} />
+
+        <View style={{ height: 10 }} />
+
+        <Row
+          left={<Sub>End-of-month balance</Sub>}
+          right={<Sub>{currency} {monthModel.endBalance.toFixed(2)}</Sub>}
+        />
       </Card>
 
       {/* 3) PROJECTION LAST */}
