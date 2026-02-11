@@ -9,12 +9,13 @@ import { isoDate } from "../../src/domain/schedule";
 import { useRepo, FlowRow } from "../../src/db/repo";
 
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const FLOW_TYPES = ["savings", "investment", "debt", "goal"];
+const FLOW_TYPES = ["savings", "investment", "debt", "goal"] as const;
 
 function defaultRuleForFrequency(freq: Frequency): ScheduleRule {
   if (freq === "weekly") return { kind: "weekly", dayOfWeek: 5 }; // Friday default
   if (freq === "fortnightly") return { kind: "fortnightly", anchorISO: isoDate(new Date()) };
-  return { kind: "monthly", dayOfMonth: 1 };
+  if (freq === "monthly") return { kind: "monthly", dayOfMonth: 1 };
+  return { kind: "once", dateISO: isoDate(new Date()) };
 }
 
 export default function FlowEdit() {
@@ -23,7 +24,7 @@ export default function FlowEdit() {
   const params = useLocalSearchParams<{ id?: string }>();
   const id = params.id ? Number(params.id) : undefined;
 
-  const [flowType, setFlowType] = useState(FLOW_TYPES[0]);
+  const [flowType, setFlowType] = useState<(typeof FLOW_TYPES)[number]>("savings");
   const [name, setName] = useState("");
   const [amount, setAmount] = useState("0");
   const [frequency, setFrequency] = useState<Frequency>("monthly");
@@ -41,10 +42,10 @@ export default function FlowEdit() {
       const row = rows.find((x) => x.id === id) as FlowRow | undefined;
       if (!row) return;
 
-      setFlowType(row.flow_type);
+      setFlowType(row.flow_type as any);
       setName(row.name);
       setAmount(String(row.amount));
-      setFrequency(row.frequency);
+      setFrequency(row.frequency as Frequency);
       setEnabled(row.enabled === 1);
       setGoalTarget(row.goal_target != null ? String(row.goal_target) : "");
       setRule(JSON.parse(row.rule_json) as ScheduleRule);
@@ -62,6 +63,14 @@ export default function FlowEdit() {
     const amt = Number(amount);
     if (!name.trim()) return Alert.alert("Name required");
     if (!Number.isFinite(amt)) return Alert.alert("Invalid amount", "Enter a valid number.");
+
+    // Validate one-time date format lightly
+    if (frequency === "once") {
+      const r = rule as any;
+      if (!r?.dateISO || typeof r.dateISO !== "string" || r.dateISO.length !== 10) {
+        return Alert.alert("Invalid date", "Use format YYYY-MM-DD");
+      }
+    }
 
     const gt = goalTarget.trim().length ? Number(goalTarget) : null;
     if (goalTarget.trim().length && !Number.isFinite(gt)) return Alert.alert("Invalid goal target");
@@ -111,7 +120,7 @@ export default function FlowEdit() {
 
       <Card>
         <Label>Name</Label>
-        <Input value={name} onChangeText={setName} placeholder="Savings" />
+        <Input value={name} onChangeText={setName} placeholder="Credit card payoff" />
       </Card>
 
       <Card>
@@ -122,7 +131,7 @@ export default function FlowEdit() {
       <Card>
         <Label>Frequency</Label>
         <View style={styles.pills}>
-          {(["weekly", "fortnightly", "monthly"] as Frequency[]).map((f) => (
+          {(["once", "weekly", "fortnightly", "monthly"] as Frequency[]).map((f) => (
             <Pressable key={f} onPress={() => setFreq(f)} style={[styles.pill, frequency === f && styles.pillOn]}>
               <Text style={[styles.pillText, frequency === f && styles.pillTextOn]}>{f}</Text>
             </Pressable>
@@ -132,6 +141,18 @@ export default function FlowEdit() {
 
       <Card>
         <Label>Schedule</Label>
+
+        {frequency === "once" && rule.kind === "once" ? (
+          <>
+            <Sub>One-time date</Sub>
+            <Input
+              value={rule.dateISO}
+              onChangeText={(t) => setRule({ kind: "once", dateISO: t })}
+              placeholder="YYYY-MM-DD"
+              autoCapitalize="none"
+            />
+          </>
+        ) : null}
 
         {frequency === "weekly" && rule.kind === "weekly" ? (
           <>

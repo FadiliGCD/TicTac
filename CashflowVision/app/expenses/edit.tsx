@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+
 import { Screen, Card, Title, Label, Input, Sub, PrimaryButton, DangerButton } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
 import type { Frequency } from "../../src/domain/money";
@@ -9,12 +10,23 @@ import { isoDate } from "../../src/domain/schedule";
 import { useRepo, ExpenseRow } from "../../src/db/repo";
 
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const CATS = ["Rent", "Bills", "Subscriptions", "Transport", "Food", "Insurance", "Other"];
+
+const CATEGORIES = [
+  "Rent",
+  "Bills",
+  "Groceries",
+  "Transport",
+  "Subscriptions",
+  "Health",
+  "Entertainment",
+  "Other",
+] as const;
 
 function defaultRuleForFrequency(freq: Frequency): ScheduleRule {
   if (freq === "weekly") return { kind: "weekly", dayOfWeek: 5 }; // Friday default
   if (freq === "fortnightly") return { kind: "fortnightly", anchorISO: isoDate(new Date()) };
-  return { kind: "monthly", dayOfMonth: 1 };
+  if (freq === "monthly") return { kind: "monthly", dayOfMonth: 1 };
+  return { kind: "once", dateISO: isoDate(new Date()) };
 }
 
 export default function ExpenseEdit() {
@@ -24,7 +36,7 @@ export default function ExpenseEdit() {
   const id = params.id ? Number(params.id) : undefined;
 
   const [name, setName] = useState("");
-  const [category, setCategory] = useState(CATS[0]);
+  const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("Other");
   const [amount, setAmount] = useState("0");
   const [frequency, setFrequency] = useState<Frequency>("monthly");
   const [enabled, setEnabled] = useState(true);
@@ -41,9 +53,9 @@ export default function ExpenseEdit() {
       if (!row) return;
 
       setName(row.name);
-      setCategory(row.category);
+      setCategory((row.category as any) || "Other");
       setAmount(String(row.amount));
-      setFrequency(row.frequency);
+      setFrequency(row.frequency as Frequency);
       setEnabled(row.enabled === 1);
       setRule(JSON.parse(row.rule_json) as ScheduleRule);
     })();
@@ -61,6 +73,13 @@ export default function ExpenseEdit() {
     if (!name.trim()) return Alert.alert("Name required");
     if (!Number.isFinite(amt)) return Alert.alert("Invalid amount", "Enter a valid number.");
 
+    if (frequency === "once") {
+      const r = rule as any;
+      if (!r?.dateISO || typeof r.dateISO !== "string" || r.dateISO.length !== 10) {
+        return Alert.alert("Invalid date", "Use format YYYY-MM-DD");
+      }
+    }
+
     await repo.upsertExpense({
       id,
       name: name.trim(),
@@ -70,6 +89,7 @@ export default function ExpenseEdit() {
       rule,
       enabled,
     });
+
     router.back();
   }
 
@@ -94,13 +114,13 @@ export default function ExpenseEdit() {
 
       <Card>
         <Label>Name</Label>
-        <Input value={name} onChangeText={setName} placeholder="Rent" />
+        <Input value={name} onChangeText={setName} placeholder="Car repair / New shoes / etc." />
       </Card>
 
       <Card>
         <Label>Category</Label>
         <View style={styles.pills}>
-          {CATS.map((c) => (
+          {CATEGORIES.map((c) => (
             <Pressable key={c} onPress={() => setCategory(c)} style={[styles.pill, category === c && styles.pillOn]}>
               <Text style={[styles.pillText, category === c && styles.pillTextOn]}>{c}</Text>
             </Pressable>
@@ -116,16 +136,33 @@ export default function ExpenseEdit() {
       <Card>
         <Label>Frequency</Label>
         <View style={styles.pills}>
-          {(["weekly", "fortnightly", "monthly"] as Frequency[]).map((f) => (
+          {(["once", "weekly", "fortnightly", "monthly"] as Frequency[]).map((f) => (
             <Pressable key={f} onPress={() => setFreq(f)} style={[styles.pill, frequency === f && styles.pillOn]}>
               <Text style={[styles.pillText, frequency === f && styles.pillTextOn]}>{f}</Text>
             </Pressable>
           ))}
         </View>
+        {frequency === "once" ? (
+          <Sub style={{ marginTop: 8 }}>
+            One-time expenses show once on the Calendar and help you track a specific month.
+          </Sub>
+        ) : null}
       </Card>
 
       <Card>
         <Label>Schedule</Label>
+
+        {frequency === "once" && rule.kind === "once" ? (
+          <>
+            <Sub>One-time date</Sub>
+            <Input
+              value={rule.dateISO}
+              onChangeText={(t) => setRule({ kind: "once", dateISO: t })}
+              placeholder="YYYY-MM-DD"
+              autoCapitalize="none"
+            />
+          </>
+        ) : null}
 
         {frequency === "weekly" && rule.kind === "weekly" ? (
           <>
@@ -146,7 +183,7 @@ export default function ExpenseEdit() {
 
         {frequency === "fortnightly" && rule.kind === "fortnightly" ? (
           <>
-            <Sub>Anchor date (first due date)</Sub>
+            <Sub>Anchor date (first occurrence)</Sub>
             <Input
               value={rule.anchorISO}
               onChangeText={(t) => setRule({ kind: "fortnightly", anchorISO: t })}

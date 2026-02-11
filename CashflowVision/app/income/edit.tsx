@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
+
 import { Screen, Card, Title, Label, Input, Sub, PrimaryButton, DangerButton } from "../../src/ui/components";
 import { theme } from "../../src/ui/theme";
 import type { Frequency } from "../../src/domain/money";
@@ -13,7 +14,8 @@ const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 function defaultRuleForFrequency(freq: Frequency): ScheduleRule {
   if (freq === "weekly") return { kind: "weekly", dayOfWeek: 5 }; // Friday default
   if (freq === "fortnightly") return { kind: "fortnightly", anchorISO: isoDate(new Date()) };
-  return { kind: "monthly", dayOfMonth: 1 };
+  if (freq === "monthly") return { kind: "monthly", dayOfMonth: 1 };
+  return { kind: "once", dateISO: isoDate(new Date()) };
 }
 
 export default function IncomeEdit() {
@@ -40,7 +42,7 @@ export default function IncomeEdit() {
 
       setName(row.name);
       setAmount(String(row.amount));
-      setFrequency(row.frequency);
+      setFrequency(row.frequency as Frequency);
       setEnabled(row.enabled === 1);
       setRule(JSON.parse(row.rule_json) as ScheduleRule);
     })();
@@ -58,6 +60,13 @@ export default function IncomeEdit() {
     if (!name.trim()) return Alert.alert("Name required");
     if (!Number.isFinite(amt)) return Alert.alert("Invalid amount", "Enter a valid number.");
 
+    if (frequency === "once") {
+      const r = rule as any;
+      if (!r?.dateISO || typeof r.dateISO !== "string" || r.dateISO.length !== 10) {
+        return Alert.alert("Invalid date", "Use format YYYY-MM-DD");
+      }
+    }
+
     await repo.upsertIncome({
       id,
       name: name.trim(),
@@ -66,6 +75,7 @@ export default function IncomeEdit() {
       rule,
       enabled,
     });
+
     router.back();
   }
 
@@ -90,7 +100,7 @@ export default function IncomeEdit() {
 
       <Card>
         <Label>Name</Label>
-        <Input value={name} onChangeText={setName} placeholder="Job" />
+        <Input value={name} onChangeText={setName} placeholder="Salary / Bonus / Refund" />
       </Card>
 
       <Card>
@@ -101,16 +111,33 @@ export default function IncomeEdit() {
       <Card>
         <Label>Frequency</Label>
         <View style={styles.pills}>
-          {(["weekly", "fortnightly", "monthly"] as Frequency[]).map((f) => (
+          {(["once", "weekly", "fortnightly", "monthly"] as Frequency[]).map((f) => (
             <Pressable key={f} onPress={() => setFreq(f)} style={[styles.pill, frequency === f && styles.pillOn]}>
               <Text style={[styles.pillText, frequency === f && styles.pillTextOn]}>{f}</Text>
             </Pressable>
           ))}
         </View>
+        {frequency === "once" ? (
+          <Sub style={{ marginTop: 8 }}>
+            One-time income shows once on the Calendar (e.g., bonus, tax return).
+          </Sub>
+        ) : null}
       </Card>
 
       <Card>
         <Label>Schedule</Label>
+
+        {frequency === "once" && rule.kind === "once" ? (
+          <>
+            <Sub>One-time date</Sub>
+            <Input
+              value={rule.dateISO}
+              onChangeText={(t) => setRule({ kind: "once", dateISO: t })}
+              placeholder="YYYY-MM-DD"
+              autoCapitalize="none"
+            />
+          </>
+        ) : null}
 
         {frequency === "weekly" && rule.kind === "weekly" ? (
           <>
@@ -131,7 +158,7 @@ export default function IncomeEdit() {
 
         {frequency === "fortnightly" && rule.kind === "fortnightly" ? (
           <>
-            <Sub>Anchor date (first payday)</Sub>
+            <Sub>Anchor date (first occurrence)</Sub>
             <Input
               value={rule.anchorISO}
               onChangeText={(t) => setRule({ kind: "fortnightly", anchorISO: t })}
@@ -176,7 +203,9 @@ export default function IncomeEdit() {
                 <Sub style={{ marginTop: 8 }}>Custom day (1–28)</Sub>
                 <Input
                   value={String(rule.dayOfMonth ?? 1)}
-                  onChangeText={(t) => setRule({ kind: "monthly", dayOfMonth: Math.max(1, Math.min(28, Number(t) || 1)) })}
+                  onChangeText={(t) =>
+                    setRule({ kind: "monthly", dayOfMonth: Math.max(1, Math.min(28, Number(t) || 1)) })
+                  }
                   keyboardType="number-pad"
                 />
               </>
